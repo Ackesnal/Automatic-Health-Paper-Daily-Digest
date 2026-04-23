@@ -142,25 +142,31 @@ class LLMProcessor:
         top_types  = type_counter.most_common(5)
         top_areas  = area_counter.most_common(5)
 
+        paeds_papers = sorted(
+            [p for p in papers if p.patient_group == "Paediatric"],
+            key=lambda x: x.relevance_score, reverse=True,
+        )
+        paeds_block = "\n".join(
+            f"  - [{p.relevance_score}/5] {p.title}\n"
+            f"    Findings: {'; '.join(p.key_findings[:2])}"
+            for p in paeds_papers[:5]
+        ) or "  (none today)"
+
         high_papers = sorted(
             [p for p in papers if p.relevance_score >= 4],
             key=lambda x: x.relevance_score,
             reverse=True,
         )[:5]
         high_block = "\n".join(
-            f"  - [{p.relevance_score}/5] {p.title} ({p.source})"
+            f"  - [{p.relevance_score}/5] {p.title} ({p.source})\n"
+            f"    Findings: {'; '.join(p.key_findings[:2])}"
             for p in high_papers
         ) or "  (none)"
 
-        all_findings = []
-        for p in papers:
-            all_findings.extend(p.key_findings[:2])
-        sample_findings = "\n".join(f"  - {f}" for f in all_findings[:20])
-
-        prompt = f"""You are a senior medical research editor. Write a concise daily overview paragraph for today's healthcare research digest.
+        prompt = f"""You are a senior medical research editor. Write a structured daily overview for today's healthcare research digest, consisting of exactly THREE paragraphs separated by a blank line.
 
 Date: {date_str}
-Total papers: {len(papers)}
+Total papers: {len(papers)} ({len(paeds_papers)} paediatric)
 Sources: PubMed + medRxiv
 
 [Top Topics (up to 5)]
@@ -172,19 +178,21 @@ Sources: PubMed + medRxiv
 [Specific Research Areas (up to 5)]
 {chr(10).join(f"  {a}: {c} paper(s)" for a, c in top_areas) or "  (no data)"}
 
+[Paediatric Papers]
+{paeds_block}
+
 [High-Impact Papers (score >= 4)]
 {high_block}
 
-[Sample Key Findings]
-{sample_findings}
+Write EXACTLY three paragraphs:
 
-Write a 300-500 word daily overview paragraph that:
-1. Summarises the overall research landscape and dominant themes today;
-2. Comments on the distribution of study types (e.g. proportion of RCTs, reviews);
-3. In a new paragraph, summarises the papers on paediatric populations (if any) and their key findings; Otherwise, states that there are no paediatric-focused papers today;
-4. In a new paragraph, highlights the core findings of 2-3 most important papers;
-5. Identifies any emerging trends or noteworthy patterns;
-6. Uses clear, professional language aimed at healthcare practitioners."""
+PARAGRAPH 1 (100-150 words): General landscape summary. Cover the dominant topics, distribution of study types (e.g. proportion of RCTs, reviews, observational studies), and overall breadth of today's research.
+
+PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and key findings. If there are none, state clearly: "No paediatric-focused papers are featured in today's digest."
+
+PARAGRAPH 3 (80-120 words): Key contributions. Highlight the core findings of the 2-3 most important papers (highest relevance score), explaining their significance for clinical practice.
+
+Use clear, professional language aimed at healthcare practitioners. Do not use headers or bullet points."""
 
         for attempt in range(2):
             try:

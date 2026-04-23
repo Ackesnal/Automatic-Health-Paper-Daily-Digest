@@ -179,7 +179,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
         plural_p = "s" if len(paeds_all) > 1 else ""
         paeds_html = f"""
 <div style="margin-bottom:32px;">
-  <div style="font-size:16px;font-weight:700;color:#1565C0;margin-bottom:16px;">
+  <div style="font-size:17px;font-weight:700;color:#1565C0;margin-bottom:16px;">
     &#128118; Paediatric Papers ({len(paeds_all)})
   </div>
   {paeds_cards}
@@ -220,7 +220,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
 
     adult_section_header = f"""
 <div style="border-top:2px solid #E0E0E0;padding-top:20px;margin-bottom:20px;">
-  <div style="font-size:16px;font-weight:700;color:#1565C0;margin-bottom:16px;">
+  <div style="font-size:17px;font-weight:700;color:#1565C0;margin-bottom:16px;">
     &#128100; Adult / General Papers ({len(adult_all)})
   </div>
   {adult_topics_html}
@@ -282,11 +282,11 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
           style="background:#1565C0;padding:24px 28px;
                  border-radius:8px 8px 0 0;text-align:center;">
         {logo_html}
-        <h1 style="margin:0 0 6px 0;font-size:22px;color:#ffffff;
+        <h1 style="margin:0 0 6px 0;font-size:25px;color:#ffffff;
                    font-family:Arial,Helvetica,sans-serif;">
           Medical Research Daily Digest
         </h1>
-        <p style="margin:0;font-size:13px;color:#ffffff;opacity:.9;">{date_str}</p>
+        <p style="margin:0;font-size:17px;color:#ffffff;opacity:.9;">{date_str}</p>
       </td>
     </tr>
   </table>
@@ -307,7 +307,11 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
     <div style="font-size:17px;font-weight:700;color:#2E7D32;margin-bottom:10px;">
       &#128221; Daily Overview
     </div>
-    <p style="font-size:13px;color:#1B5E20;line-height:1.9;margin:0;white-space:pre-wrap;">{daily_summary}</p>
+    {"".join(
+        f'<p style="font-size:13px;color:#1B5E20;line-height:1.9;margin:0 0 12px 0;">{para.strip()}</p>'
+        for para in daily_summary.split("\n\n")
+        if para.strip()
+    )}
   </div>
 
   <!-- Papers by topic -->
