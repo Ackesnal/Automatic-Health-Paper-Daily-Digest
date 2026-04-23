@@ -181,8 +181,8 @@ Sources: PubMed + medRxiv
 Write a 300-500 word daily overview paragraph that:
 1. Summarises the overall research landscape and dominant themes today;
 2. Comments on the distribution of study types (e.g. proportion of RCTs, reviews);
-3. Starts a new paragraph and summarises the papers on paediatric populations (if any) and their key findings;
-4. Starts a new paragraph and highlights the core findings of 2-3 most important papers;
+3. In a new paragraph, summarises the papers on paediatric populations (if any) and their key findings; Otherwise, states that there are no paediatric-focused papers today;
+4. In a new paragraph, highlights the core findings of 2-3 most important papers;
 5. Identifies any emerging trends or noteworthy patterns;
 6. Uses clear, professional language aimed at healthcare practitioners."""
 

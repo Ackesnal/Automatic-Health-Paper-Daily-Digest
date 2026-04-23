@@ -179,9 +179,8 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
         plural_p = "s" if len(paeds_all) > 1 else ""
         paeds_html = f"""
 <div style="margin-bottom:32px;">
-  <div style="background:#E65100;color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:12px;">
-    <span style="font-size:15px;font-weight:600;">&#128118; Paediatric Papers</span>
-    <span style="font-size:12px;opacity:0.85;margin-left:8px;">({len(paeds_all)} paper{plural_p})</span>
+  <div style="font-size:16px;font-weight:700;color:#1565C0;margin-bottom:16px;">
+    &#128118; Paediatric Papers ({len(paeds_all)})
   </div>
   {paeds_cards}
 </div>"""
@@ -305,7 +304,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
 
   <!-- Daily Summary -->
   <div style="background:#E8F5E9;border:1px solid #C8E6C9;border-top:none;padding:20px 24px;">
-    <div style="font-size:13px;font-weight:700;color:#2E7D32;margin-bottom:10px;">
+    <div style="font-size:17px;font-weight:700;color:#2E7D32;margin-bottom:10px;">
       &#128221; Daily Overview
     </div>
     <p style="font-size:13px;color:#1B5E20;line-height:1.9;margin:0;white-space:pre-wrap;">{daily_summary}</p>

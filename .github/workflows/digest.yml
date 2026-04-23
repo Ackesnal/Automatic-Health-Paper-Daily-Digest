@@ -26,8 +26,14 @@ jobs:
           EMAIL_SENDER:        ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD:      ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT:     ${{ secrets.EMAIL_RECIPIENT }}
-          PUBMED_EMAIL:        ${{ secrets.PUBMED_EMAIL }}
+          EMAIL_LOGO_URL:      ${{ secrets.EMAIL_LOGO_URL }}
           PUBMED_SEARCH_QUERY: ${{ secrets.PUBMED_SEARCH_QUERY }}
           LLM_MODEL:           ${{ secrets.LLM_MODEL }}
           DAYS_BACK:           ${{ secrets.DAYS_BACK }}
+          MAX_PAPERS_MEDRXIV:  ${{ secrets.MAX_PAPERS_MEDRXIV }}
+          MAX_PAPERS_PUBMED:   ${{ secrets.MAX_PAPERS_PUBMED }}
+          DOWNLOAD_PDFS:       ${{ secrets.DOWNLOAD_PDFS }}
+          MAX_PDF_PAPERS:      ${{ secrets.MAX_PDF_PAPERS }}
+          SMTP_PORT:           ${{ secrets.SMTP_PORT }}
+          SMTP_SERVER:         ${{ secrets.SMTP_SERVER }}
         run: python main.py --run-now
