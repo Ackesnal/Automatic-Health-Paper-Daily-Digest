@@ -1,0 +1,33 @@
+name: Medical Paper Digest
+
+on:
+  schedule:
+    # UTC 01:00 每天运行 = 北京时间 09:00 = 澳洲东部时间 11:00
+    - cron: '0 1 * * *'
+  workflow_dispatch:  # 允许在 GitHub 网页手动触发
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
+          EMAIL_SENDER:        ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD:      ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT:     ${{ secrets.EMAIL_RECIPIENT }}
+          PUBMED_EMAIL:        ${{ secrets.PUBMED_EMAIL }}
+          PUBMED_SEARCH_QUERY: ${{ secrets.PUBMED_SEARCH_QUERY }}
+          LLM_MODEL:           ${{ secrets.LLM_MODEL }}
+          DAYS_BACK:           ${{ secrets.DAYS_BACK }}
+        run: python main.py --run-now
