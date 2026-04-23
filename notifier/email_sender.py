@@ -243,15 +243,15 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
   <tr>
     <td width="33%" align="center" style="border-right:1px solid #7A5899;">
       <div style="font-size:26px;font-weight:700;color:#51247A;">{len(papers)}</div>
-      <div style="font-size:13px;font-weight:550;color:#51247A;text-transform:uppercase;letter-spacing:.5px;">Total Papers</div>
+      <div style="font-size:13px;color:#51247A;font-weight:700;">TOTAL PAPERS</div>
     </td>
     <td width="33%" align="center" style="border-right:1px solid #7A5899;">
       <div style="font-size:26px;font-weight:700;color:#51247A;">{len(by_topic)}</div>
-      <div style="font-size:13px;font-weight:550;color:#51247A;text-transform:uppercase;letter-spacing:.5px;">Topic Areas</div>
+      <div style="font-size:13px;color:#51247A;font-weight:700;">TOPIC AREAS</div>
     </td>
     <td width="34%" align="center">
       <div style="font-size:26px;font-weight:700;color:#51247A;">{high}</div>
-      <div style="font-size:13px;font-weight:550;color:#51247A;text-transform:uppercase;letter-spacing:.5px;">High-Impact (&#9733;&#9733;&#9733;&#9733;+)</div>
+      <div style="font-size:13px;color:#51247A;font-weight:700;">HIGH-IMPACT (&#9733;&#9733;&#9733;&#9733;+)</div>
     </td>
   </tr>
 </table>"""
@@ -294,7 +294,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
   {stats_table}
 
   <!-- Intro -->
-  <div style="background:#fff;border:1px solid #E0E0E0;border-top:none;padding:18px 24px;">
+  <div style="background:#E3F2FD;border:1px solid #75BEFA;border-top:none;padding:18px 24px;">
     <p style="font-size:13px;color:#424242;line-height:1.75;margin:0;font-style:italic;">
       {intro}
     </p>
