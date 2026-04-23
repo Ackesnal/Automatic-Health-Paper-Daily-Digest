@@ -188,7 +188,7 @@ Write EXACTLY three paragraphs:
 
 PARAGRAPH 1 (100-150 words): General landscape summary. Cover the dominant topics, distribution of study types (e.g. proportion of RCTs, reviews, observational studies), and overall breadth of today's research.
 
-PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and key findings. If there are none, state clearly: "No paediatric-focused papers are featured in today's digest."
+PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and the core findings of the 2-3 most important papers. If there are none, state clearly: "No paediatric-focused papers are featured in today's digest."
 
 PARAGRAPH 3 (80-120 words): Key contributions. Highlight the core findings of the 2-3 most important papers (highest relevance score), explaining their significance for clinical practice.
 
