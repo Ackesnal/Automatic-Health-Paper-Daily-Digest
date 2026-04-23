@@ -32,7 +32,7 @@ jobs:
           DAYS_BACK:           ${{ secrets.DAYS_BACK }}
           MAX_PAPERS_MEDRXIV:  ${{ secrets.MAX_PAPERS_MEDRXIV }}
           MAX_PAPERS_PUBMED:   ${{ secrets.MAX_PAPERS_PUBMED }}
-          DOWNLOAD_PDFS:       ${{ secrets.DOWNLOAD_PDFS }}
+          DOWNLOAD_PDFS:       "false"   # cloud IPs are blocked by medRxiv/PubMed (403)
           MAX_PDF_PAPERS:      ${{ secrets.MAX_PDF_PAPERS }}
           SMTP_PORT:           ${{ secrets.SMTP_PORT }}
           SMTP_SERVER:         ${{ secrets.SMTP_SERVER }}
