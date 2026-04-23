@@ -1,0 +1,23 @@
+# Secrets – never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Logs & generated output
+logs/
+*.html
+
+# IDE
+.vscode/
+.idea/
