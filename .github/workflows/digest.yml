@@ -3,7 +3,7 @@ name: Medical Paper Digest
 on:
   schedule:
     # UTC 01:00 每天运行 = 北京时间 09:00 = 澳洲东部时间 11:00
-    - cron: '0 1 * * *'
+    - cron: '25 5 * * *'
   workflow_dispatch:  # 允许在 GitHub 网页手动触发
 
 jobs:
