@@ -71,21 +71,29 @@ class PubMedFetcher:
     def _fetch_details(self, pmids: List[str]) -> List[Paper]:
         if not pmids:
             return []
-        time.sleep(0.4)  # respect NCBI rate limit (3 req/s without API key)
-        params = {
-            **self._base,
-            "db": "pubmed",
-            "id": ",".join(pmids),
-            "retmode": "xml",
-            "rettype": "abstract",
-        }
-        try:
-            r = requests.get(EFETCH_URL, params=params, timeout=60)
-            r.raise_for_status()
-            return self._parse_xml(r.text)
-        except Exception as exc:
-            logger.error("PubMed fetch error: %s", exc)
-            return []
+
+        _CHUNK = 100  # NCBI recommends ≤200, 100 keeps URL short even with GET fallback
+        papers: List[Paper] = []
+
+        for i in range(0, len(pmids), _CHUNK):
+            chunk = pmids[i: i + _CHUNK]
+            time.sleep(0.4)  # respect NCBI rate limit (3 req/s without API key)
+            data = {
+                **self._base,
+                "db": "pubmed",
+                "id": ",".join(chunk),
+                "retmode": "xml",
+                "rettype": "abstract",
+            }
+            try:
+                # POST avoids 414 Request-URI Too Long for large ID lists
+                r = requests.post(EFETCH_URL, data=data, timeout=60)
+                r.raise_for_status()
+                papers.extend(self._parse_xml(r.text))
+            except Exception as exc:
+                logger.error("PubMed fetch error (chunk %d–%d): %s", i, i + len(chunk), exc)
+
+        return papers
 
     def _parse_xml(self, xml_text: str) -> List[Paper]:
         papers: List[Paper] = []
@@ -145,6 +153,9 @@ class PubMedFetcher:
 
             pub_date = self._parse_date(art)
 
+            journal_el = art.find("Journal/Title")
+            journal = journal_el.text.strip() if journal_el is not None else ""
+
             return Paper(
                 title=title,
                 authors=authors[:5],
@@ -154,6 +165,7 @@ class PubMedFetcher:
                 source="PubMed",
                 published=pub_date,
                 paper_id=f"pmid_{pmid}",
+                journal=journal,
             )
         except Exception as exc:
             logger.error("Error parsing PubMed article: %s", exc)

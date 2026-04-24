@@ -111,6 +111,7 @@ class MedRxivFetcher:
                 source="medRxiv",
                 published=pub_date,
                 paper_id=doi.replace("/", "_"),
+                journal=item.get("journal_name", "").strip(),
             )
         except Exception as exc:
             logger.error("Error converting medRxiv item to Paper: %s", exc)

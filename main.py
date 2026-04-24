@@ -1,7 +1,7 @@
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import schedule
@@ -30,17 +30,24 @@ logger = logging.getLogger(__name__)
 # ── Core digest function ─────────────────────────────────────────────────────
 
 def run_digest():
-    """Fetch → process → email one daily digest cycle."""
+    """Fetch → filter → process → email one weekly digest cycle."""
     # Deferred imports so logging is configured first
     from config import Config
     from fetchers.medrxiv_fetcher import MedRxivFetcher
     from fetchers.pubmed_fetcher import PubMedFetcher
+    from processors.paper_filter import filter_papers
     from processors.llm_processor import LLMProcessor
     from processors.pdf_parser import extract_text_from_pdf_url
     from notifier.email_sender import send_email, save_html_report
 
-    date_str = datetime.now().strftime("%B %d, %Y")
-    logger.info("=== Medical Research Digest – %s ===", date_str)
+    today = datetime.now()
+    week_start = today - timedelta(days=today.weekday())   # Monday
+    week_end   = week_start + timedelta(days=6)             # Sunday
+    if week_start.month == week_end.month:
+        date_str = f"{week_start.strftime('%B %d')}\u2013{week_end.strftime('%d, %Y')}"
+    else:
+        date_str = f"{week_start.strftime('%B %d')} \u2013 {week_end.strftime('%B %d, %Y')}"
+    logger.info("=== Medical Research Weekly Digest \u2013 %s ===", date_str)
 
     all_papers = []
 
@@ -60,7 +67,7 @@ def run_digest():
         logger.error("PubMed fetch failed: %s", exc)
 
     if not all_papers:
-        logger.warning("No papers fetched – skipping digest for today.")
+        logger.warning("No papers fetched \u2013 skipping digest for this week.")
         return
 
     # Deduplicate by lowercased title
@@ -76,6 +83,12 @@ def run_digest():
         len(unique), len(all_papers) - len(unique),
     )
     all_papers = unique
+
+    # 1b. Relevance filter ────────────────────────────────────────────────
+    all_papers = filter_papers(all_papers)
+    if not all_papers:
+        logger.warning("No relevant papers after filtering \u2013 skipping digest.")
+        return
 
     # 2. Optional PDF download ─────────────────────────────────────────────
     if Config.DOWNLOAD_PDFS:
@@ -97,13 +110,11 @@ def run_digest():
         logger.info("PDFs downloaded: %d", downloaded)
 
     # 3. LLM processing ────────────────────────────────────────────────────
-    intro = f"Today's digest covers {len(all_papers)} recent healthcare and medical research papers."
-    daily_summary = ""
+    weekly_summary = ""
     try:
         processor = LLMProcessor()
         all_papers = processor.process_papers(all_papers)
-        intro = processor.generate_digest_intro(all_papers, date_str)
-        daily_summary = processor.generate_daily_summary(all_papers, date_str)
+        weekly_summary = processor.generate_weekly_summary(all_papers, date_str)
         logger.info("LLM processing complete")
     except ValueError as exc:
         logger.error("LLM config error: %s", exc)
@@ -116,10 +127,10 @@ def run_digest():
         logger.error("LLM processing error: %s", exc)
 
     # 4. Send email ────────────────────────────────────────────────────────
-    success = send_email(all_papers, intro, daily_summary, date_str)
+    success = send_email(all_papers, weekly_summary, date_str)
     if not success:
         fallback = log_dir / f"digest_{datetime.now().strftime('%Y%m%d')}.html"
-        save_html_report(all_papers, intro, daily_summary, date_str, str(fallback))
+        save_html_report(all_papers, weekly_summary, date_str, str(fallback))
         logger.warning("Email failed – HTML saved to %s", fallback)
 
     logger.info("=== Digest complete: %d papers ===", len(all_papers))
@@ -151,8 +162,8 @@ def main():
         run_digest()
 
     from config import Config
-    logger.info("Scheduling daily digest at %s (24h clock)", Config.SCHEDULE_TIME)
-    schedule.every().day.at(Config.SCHEDULE_TIME).do(run_digest)
+    logger.info("Scheduling weekly digest on Mondays at %s (24h clock)", Config.SCHEDULE_TIME)
+    schedule.every().monday.at(Config.SCHEDULE_TIME).do(run_digest)
     logger.info("Scheduler running. Press Ctrl+C to stop.")
     while True:
         schedule.run_pending()

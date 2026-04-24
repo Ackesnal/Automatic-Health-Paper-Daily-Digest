@@ -137,35 +137,30 @@ def _paper_card(paper: Paper) -> str:
 </div>"""
 
 
-def _study_type_chart(papers: List[Paper]) -> str:
-    """Simple text-based study-type distribution table for the email."""
+def _topics_distribution_chart(papers: List[Paper]) -> str:
+    """Topic distribution bar chart with no surrounding description text."""
     from collections import Counter
-    counts = Counter(p.study_type for p in papers if p.study_type)
+    counts = Counter(p.topic for p in papers if p.topic)
     if not counts:
         return ""
-    rows = ""
     total = len(papers)
-    for st, cnt in counts.most_common():
+    rows = ""
+    for topic, cnt in counts.most_common():
         pct = cnt / total * 100
-        bar_w = max(4, int(pct * 1.5))  # scale to ~150px max
-        bg = _TYPE_BADGE.get(st, "#757575")
+        bar_w = max(4, int(pct * 2))  # scale to ~200px max
+        bg = _color(topic)
         rows += f"""
 <tr>
-  <td style="font-size:11px;color:#424242;padding:3px 8px 3px 0;white-space:nowrap;width:220px;">{st}</td>
-  <td style="padding:3px 6px;">
-    <div style="background:{bg};height:10px;width:{bar_w}px;border-radius:3px;display:inline-block;"></div>
+  <td style="font-size:12px;color:#424242;padding:4px 10px 4px 0;white-space:nowrap;">{topic}</td>
+  <td style="padding:4px 8px;">
+    <div style="background:{bg};height:12px;width:{bar_w}px;border-radius:3px;display:inline-block;"></div>
   </td>
-  <td style="font-size:11px;color:#757575;padding:3px 0;">{cnt} ({pct:.0f}%)</td>
+  <td style="font-size:12px;color:#757575;padding:4px 0;">{cnt} ({pct:.0f}%)</td>
 </tr>"""
-    return f"""
-<div style="margin:16px 0 8px 0;">
-  <div style="font-size:11px;font-weight:bold;color:#757575;text-transform:uppercase;
-              letter-spacing:.5px;margin-bottom:8px;">Study Type Distribution</div>
-  <table cellpadding="0" cellspacing="0">{rows}</table>
-</div>"""
+    return f'<table cellpadding="0" cellspacing="0" width="100%">{rows}</table>'
 
 
-def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: str) -> str:
+def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
     # Split by patient group first
     paeds_all = sorted(
         [p for p in papers if p.patient_group == "Paediatric"],
@@ -192,7 +187,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
     <span style="font-size:12px;opacity:0.85;margin-left:8px;">(0 papers)</span>
   </div>
   <p style="color:#9E9E9E;font-size:13px;font-style:italic;margin:0;">
-    No paediatric papers in today's digest.
+    No paediatric papers in this week's digest.
   </p>
 </div>"""
 
@@ -228,13 +223,14 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
 
     topics_html = paeds_html + adult_section_header
 
-    study_chart_html = _study_type_chart(papers)
-
     high = sum(1 for p in papers if p.relevance_score >= 4)
-    src_counts: Dict[str, int] = {}
-    for p in papers:
-        src_counts[p.source] = src_counts.get(p.source, 0) + 1
-    src_str = " &nbsp;|&nbsp; ".join(f"{v} from {k}" for k, v in src_counts.items())
+    topics_dist_html = _topics_distribution_chart(papers)
+    _para_style = "font-size:14px;color:#1B5E20;line-height:1.9;margin:0 0 12px 0;"
+    summary_paras_html = "".join(
+        f'<p style="{_para_style}">{para.strip()}</p>'
+        for para in weekly_summary.split("\n\n")
+        if para.strip()
+    )
 
     # Stats bar uses a table for broad email-client compatibility
     stats_table = f"""
@@ -284,7 +280,7 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
         {logo_html}
         <h1 style="margin:0 0 6px 0;font-size:25px;color:#ffffff;
                    font-family:Arial,Helvetica,sans-serif;">
-          Medical Research Daily Digest
+          Medical Research Weekly Digest
         </h1>
         <p style="margin:0;font-size:17px;color:#ffffff;opacity:.9;">{date_str}</p>
       </td>
@@ -293,25 +289,17 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
 
   {stats_table}
 
-  <!-- Intro -->
-  <div style="background:#E3F2FD;border:1px solid #75BEFA;border-top:none;padding:18px 24px;">
-    <p style="font-size:13px;color:#424242;line-height:1.75;margin:0;font-style:italic;">
-      {intro}
-    </p>
-    <p style="font-size:11px;color:#9E9E9E;margin:8px 0 0 0;">{src_str}</p>
-    {study_chart_html}
+  <!-- Topics Distribution -->
+  <div style="background:#fff;border:1px solid #E0E0E0;border-top:none;padding:16px 24px;">
+    {topics_dist_html}
   </div>
 
-  <!-- Daily Summary -->
+  <!-- Weekly Summary -->
   <div style="background:#E8F5E9;border:1px solid #C8E6C9;border-top:none;padding:20px 24px;">
     <div style="font-size:17px;font-weight:700;color:#2E7D32;margin-bottom:10px;">
-      &#128221; Daily Overview
+      &#128221; Weekly Overview
     </div>
-    {"".join(
-        f'<p style="font-size:14px;color:#1B5E20;line-height:1.9;margin:0 0 12px 0;">{para.strip()}</p>'
-        for para in daily_summary.split("\n\n")
-        if para.strip()
-    )}
+    {summary_paras_html}
   </div>
 
   <!-- Papers by topic -->
@@ -339,13 +327,13 @@ def _build_html(papers: List[Paper], intro: str, daily_summary: str, date_str: s
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def send_email(papers: List[Paper], intro: str, daily_summary: str, date_str: str) -> bool:
+def send_email(papers: List[Paper], weekly_summary: str, date_str: str) -> bool:
     """Build and send the HTML digest email. Returns True on success."""
     if not papers:
-        logger.warning("No papers to email – skipping.")
+        logger.warning("No papers to email \u2013 skipping.")
         return False
 
-    html = _build_html(papers, intro, daily_summary, date_str)
+    html = _build_html(papers, weekly_summary, date_str)
 
     recipients = Config.email_recipients()
     if not recipients:
@@ -398,9 +386,9 @@ def send_email(papers: List[Paper], intro: str, daily_summary: str, date_str: st
         return False
 
 
-def save_html_report(papers: List[Paper], intro: str, daily_summary: str, date_str: str, path: str):
+def save_html_report(papers: List[Paper], weekly_summary: str, date_str: str, path: str):
     """Fallback: save the HTML digest to a local file."""
-    html = _build_html(papers, intro, daily_summary, date_str)
+    html = _build_html(papers, weekly_summary, date_str)
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
     logger.info("HTML report saved → %s", path)

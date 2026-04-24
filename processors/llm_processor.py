@@ -49,7 +49,7 @@ PATIENT_GROUPS = [
     "No human subjects",     # animal, in vitro, computational – no human subjects
 ]
 
-_BATCH = 6          # papers per LLM call
+_BATCH = 1          # papers per LLM call
 _RETRY_SLEEP = 5    # seconds between retries
 
 
@@ -123,16 +123,15 @@ class LLMProcessor:
                 f"{len(topic_counts)} healthcare research areas."
             )
 
-    def generate_daily_summary(self, papers: List[Paper], date_str: str) -> str:
+    def generate_weekly_summary(self, papers: List[Paper], date_str: str) -> str:
         """
-        Generate a comprehensive daily overview covering:
-          - overall landscape of today's research
-          - distribution by topic and study type
-          - most significant findings
-          - emerging trends or notable patterns
+        Generate a comprehensive weekly overview consisting of three paragraphs:
+          1. General research landscape and study type distribution
+          2. Paediatric-focused papers (or note if none)
+          3. Key contributions / most important findings
         """
         if not papers:
-            return "No new papers today."
+            return "No new papers this week."
 
         topic_counter = Counter(p.topic for p in papers)
         type_counter  = Counter(p.study_type for p in papers if p.study_type)
@@ -150,7 +149,7 @@ class LLMProcessor:
             f"  - [{p.relevance_score}/5] {p.title}\n"
             f"    Findings: {'; '.join(p.key_findings[:2])}"
             for p in paeds_papers[:5]
-        ) or "  (none today)"
+        ) or "  (none this week)"
 
         high_papers = sorted(
             [p for p in papers if p.relevance_score >= 4],
@@ -163,11 +162,12 @@ class LLMProcessor:
             for p in high_papers
         ) or "  (none)"
 
-        prompt = f"""You are a senior medical research editor. Write a structured daily overview for today's healthcare research digest, consisting of exactly THREE paragraphs separated by a blank line.
+        prompt = f"""You are a senior medical research editor. Write a structured weekly overview for a critical care and emergency medicine research digest, consisting of exactly THREE paragraphs separated by a blank line.
 
-Date: {date_str}
+Week: {date_str}
 Total papers: {len(papers)} ({len(paeds_papers)} paediatric)
 Sources: PubMed + medRxiv
+Focus areas: paediatric critical care, adult intensive care, emergency medicine
 
 [Top Topics (up to 5)]
 {chr(10).join(f"  {t}: {c} paper(s)" for t, c in top_topics)}
@@ -186,13 +186,13 @@ Sources: PubMed + medRxiv
 
 Write EXACTLY three paragraphs:
 
-PARAGRAPH 1 (100-150 words): General landscape summary. Cover the dominant topics, distribution of study types (e.g. proportion of RCTs, reviews, observational studies), and overall breadth of today's research.
+PARAGRAPH 1 (100-150 words): General landscape summary. Cover the dominant topics, distribution of study types (e.g. proportion of RCTs, reviews, observational studies), and overall breadth of this week's research in critical care and emergency medicine.
 
-PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and the core findings of the 2-3 most important papers. If there are none, state clearly: "No paediatric-focused papers are featured in today's digest."
+PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and the core findings of the 2-3 most important papers. If there are none, state clearly: "No paediatric-focused papers are featured in this week's digest."
 
 PARAGRAPH 3 (80-120 words): Key contributions. Highlight the core findings of the 2-3 most important papers (highest relevance score), explaining their significance for clinical practice.
 
-Use clear, professional language aimed at healthcare practitioners. Do not use headers or bullet points."""
+Use clear, professional language aimed at intensive care and emergency medicine practitioners. Do not use headers or bullet points."""
 
         for attempt in range(2):
             try:
@@ -204,13 +204,13 @@ Use clear, professional language aimed at healthcare practitioners. Do not use h
                 )
                 return resp.choices[0].message.content.strip()
             except Exception as exc:
-                logger.error("Error generating daily summary (attempt %d): %s", attempt + 1, exc)
+                logger.error("Error generating weekly summary (attempt %d): %s", attempt + 1, exc)
                 time.sleep(_RETRY_SLEEP)
 
         # Fallback
         return (
-            f"Today's digest covers {len(papers)} healthcare research papers across "
-            f"{len(topic_counter)} topic areas. "
+            f"This week's digest covers {len(papers)} critical care and emergency medicine "
+            f"papers across {len(topic_counter)} topic areas. "
             f"Leading themes include: {', '.join(t for t, _ in top_topics[:3])}."
         )
 
@@ -220,7 +220,7 @@ Use clear, professional language aimed at healthcare practitioners. Do not use h
         """Call the LLM for one batch and update paper objects in-place."""
         papers_text = ""
         for idx, p in enumerate(papers, start=1):
-            content = p.full_text[:3000] if p.full_text else p.abstract
+            content = p.full_text[:5000] if p.full_text else p.abstract
             papers_text += (
                 f"\n--- Paper {idx} ---\n"
                 f"Title: {p.title}\n"

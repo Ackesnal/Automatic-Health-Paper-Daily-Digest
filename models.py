@@ -10,9 +10,10 @@ class Paper:
     abstract: str
     url: str
     pdf_url: str
-    source: str          # 'arXiv' or 'PubMed'
+    source: str          # 'medRxiv' or 'PubMed'
     published: datetime
     paper_id: str
+    journal: str = ""    # journal / venue name as returned by the source API
 
     # Filled after LLM processing
     topic: str = ""
