@@ -16,13 +16,13 @@ Priority 2 – Keyword match + LLM verification:
 All other papers (no journal match, no keyword hit) are discarded immediately.
 """
 
-import json
 import logging
 import re
 import time
-from typing import List, Tuple
+from typing import Any, List, cast
 
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
 from config import Config
 from models import Paper
@@ -60,6 +60,8 @@ _AREA_PATTERNS: List[re.Pattern] = [
     re.compile(r"\bICU\b"),
     re.compile(r"adult\s+intensive\s+care",       re.IGNORECASE),
     re.compile(r"adult\s+critical\s+care",        re.IGNORECASE),
+    re.compile(r"\bcritical\s+care\b",            re.IGNORECASE),
+    re.compile(r"\bintensive\s+care\b",           re.IGNORECASE),
     re.compile(r"intensive\s+care\s+unit",        re.IGNORECASE),
     re.compile(r"emergency\s+medicine",           re.IGNORECASE),
     re.compile(r"emergency\s+department",         re.IGNORECASE),
@@ -72,6 +74,35 @@ _FOCUS_AREAS = (
     "emergency medicine"
 )
 
+_SCREENING_INSTRUCTIONS = """You screen papers for a critical care and emergency medicine digest.
+
+# Goal
+Return one keep decision per paper.
+
+# Success criteria
+- Keep papers whose main focus is paediatric critical care, paediatric intensive care (PICU), adult intensive care (ICU), or emergency medicine.
+- Reject papers that mention ICU or emergency department only as incidental context.
+- Use only the provided title and abstract.
+- If a paper might belong in a focus area but the abstract is ambiguous, keep it.
+- Preserve input order.
+
+# Output
+Return structured output only.
+"""
+
+
+class RelevanceDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(description="1-based paper index in the current batch.")
+    keep: bool = Field(description="Whether to keep the paper in the digest.")
+
+
+class RelevanceBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decisions: List[RelevanceDecision]
+
 
 def _journal_relevant(journal: str) -> bool:
     return journal.strip().lower() in _TARGET_JOURNALS
@@ -79,6 +110,27 @@ def _journal_relevant(journal: str) -> bool:
 
 def _keyword_match(abstract: str) -> bool:
     return any(pat.search(abstract) for pat in _AREA_PATTERNS)
+
+
+def _screening_input(batch: List[Paper]) -> str:
+    papers_text = ""
+    for i, paper in enumerate(batch, start=1):
+        papers_text += (
+            f"\nPaper {i}\n"
+            f"Title: {paper.title}\n"
+            f"Abstract: {paper.abstract[:600]}\n"
+        )
+
+    return (
+        "Focus areas:\n"
+        f"- {_FOCUS_AREAS}\n\n"
+        "Decide whether each paper should be kept in the digest based on title and abstract only.\n"
+        f"{papers_text}"
+    )
+
+
+def _reasoning_config() -> Any:
+    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT})
 
 
 def _llm_verify(papers: List[Paper]) -> List[bool]:
@@ -95,50 +147,28 @@ def _llm_verify(papers: List[Paper]) -> List[bool]:
 
     for batch_start in range(0, len(papers), _LLM_BATCH):
         batch = papers[batch_start: batch_start + _LLM_BATCH]
-        items_text = ""
-        for i, p in enumerate(batch, start=1):
-            items_text += (
-                f"\n--- Paper {i} ---\n"
-                f"Title: {p.title}\n"
-                f"Abstract: {p.abstract[:600]}\n"
-            )
-
-        prompt = f"""You are a medical research screener for a critical care and emergency medicine digest.
-
-For each paper below, decide whether it is genuinely focused on one of these areas:
-  - Paediatric critical care
-  - Paediatric intensive care (PICU)
-  - Adult intensive care (ICU)
-  - Emergency medicine
-
-A paper that merely mentions "ICU" or "emergency department" as a minor detail (e.g. a basic-science paper where patients happened to be recruited from ICU) should be marked false.
-A paper whose main subject is diagnosis, treatment, management, outcomes, or policy within these areas should be marked true.
-
-{items_text}
-
-Return ONLY a JSON object with exactly this structure (no extra text):
-{{
-  "decisions": [
-    {{"index": 1, "keep": true}},
-    {{"index": 2, "keep": false}}
-  ]
-}}"""
+        prompt = _screening_input(batch)
 
         for attempt in range(2):
             try:
-                resp = client.chat.completions.create(
+                resp = client.responses.parse(
                     model=Config.LLM_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.0,
-                    max_completion_tokens=300,
+                    instructions=_SCREENING_INSTRUCTIONS,
+                    input=[{"role": "user", "content": prompt}],
+                    text_format=RelevanceBatch,
+                    reasoning=_reasoning_config(),
+                    max_output_tokens=300,
+                    store=False,
                 )
-                data = json.loads(resp.choices[0].message.content)
-                for item in data.get("decisions", []):
-                    idx = int(item.get("index", 1)) - 1
+                data = getattr(resp, "output_parsed", None)
+                if data is None:
+                    raise ValueError("Missing structured relevance output")
+
+                for item in data.decisions:
+                    idx = item.index - 1
                     global_idx = batch_start + idx
                     if 0 <= global_idx < len(results):
-                        results[global_idx] = bool(item.get("keep", True))
+                        results[global_idx] = item.keep
                 break
             except Exception as exc:
                 logger.warning(

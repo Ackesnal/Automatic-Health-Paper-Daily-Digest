@@ -97,7 +97,9 @@ Register-ScheduledTask -TaskName "MedicalDigest" -Action $action -Trigger $trigg
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `LLM_MODEL` | `gpt-4o-mini` | 可换成 `gpt-4o`（更准，更贵）|
+| `LLM_MODEL` | `gpt-5.5` | 默认使用 GPT-5.5；如需省成本可改成 `gpt-4o-mini` |
+| `LLM_REASONING_EFFORT` | `low` | GPT-5.5 推理强度，建议从 `low` 开始 |
+| `LLM_TEXT_VERBOSITY` | `low` | 控制摘要和周报文字长度 |
 | `MAX_PAPERS_ARXIV` | `30` | 每天从 arXiv 最多抓取篇数 |
 | `MAX_PAPERS_PUBMED` | `20` | 每天从 PubMed 最多抓取篇数 |
 | `DAYS_BACK` | `1` | 往前看几天（周一建议设为 `3` 覆盖周末）|
@@ -155,4 +157,4 @@ A: PubMed 主要收录已发表论文，有时当天没有新文章属于正常�
 A: 程序会自动将 HTML 报告保存到 `logs/` 目录，直接用浏览器打开即可阅读。
 
 **Q: 如何减少 API 费用？**
-A: 将 `LLM_MODEL=gpt-4o-mini` 并适当降低 `MAX_PAPERS_ARXIV` 和 `MAX_PAPERS_PUBMED`。
+A: 将 `LLM_MODEL=gpt-4o-mini` 或保持 `gpt-5.5` 但设置 `LLM_REASONING_EFFORT=low`，并适当降低 `MAX_PAPERS_ARXIV` 和 `MAX_PAPERS_PUBMED`。

@@ -7,6 +7,7 @@ from typing import Dict, List
 
 from config import Config
 from models import Paper
+from processors.llm_processor import TOPICS
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,16 @@ def _stars(score: int) -> str:
     return (
         f'<span style="color:#FFA000;">{filled}</span>'
         f'<span style="color:#BDBDBD;">{empty}</span>'
+    )
+
+
+_TOPIC_ORDER = {topic: index for index, topic in enumerate(TOPICS)}
+
+
+def _ordered_topics(topics: List[str]) -> List[str]:
+    return sorted(
+        topics,
+        key=lambda topic: (_TOPIC_ORDER.get(topic, len(_TOPIC_ORDER)), topic),
     )
 
 
@@ -145,7 +156,8 @@ def _topics_distribution_chart(papers: List[Paper]) -> str:
         return ""
     total = len(papers)
     rows = ""
-    for topic, cnt in counts.most_common():
+    for topic in _ordered_topics(list(counts.keys())):
+        cnt = counts[topic]
         pct = cnt / total * 100
         bar_w = max(4, int(pct * 2))  # scale to ~200px max
         bg = _color(topic)
@@ -197,7 +209,10 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
         by_topic[p.topic].append(p)
     for lst in by_topic.values():
         lst.sort(key=lambda x: x.relevance_score, reverse=True)
-    sorted_topics = sorted(by_topic.items(), key=lambda x: len(x[1]), reverse=True)
+    sorted_topics = [
+      (topic, by_topic[topic])
+      for topic in _ordered_topics(list(by_topic.keys()))
+    ]
 
     adult_topics_html = ""
     for topic, lst in sorted_topics:

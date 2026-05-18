@@ -1,10 +1,10 @@
-import json
 import logging
 import time
 from collections import Counter
-from typing import Dict, List
+from typing import Any, Dict, List, cast
 
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
 from config import Config
 from models import Paper
@@ -52,6 +52,112 @@ PATIENT_GROUPS = [
 _BATCH = 1          # papers per LLM call
 _RETRY_SLEEP = 5    # seconds between retries
 
+_DIGEST_INTRO_INSTRUCTIONS = """You write the opening lines for a daily critical care and emergency medicine research digest.
+
+# Goal
+Write a concise intro that highlights the main themes and most important findings.
+
+# Success criteria
+- Write 2 or 3 sentences.
+- Be professional, concise, and readable.
+- Lead with the dominant themes from the provided digest data.
+- Use only the provided digest metadata.
+- Do not use bullets or headings.
+"""
+
+_WEEKLY_SUMMARY_INSTRUCTIONS = """You write the weekly overview for a critical care and emergency medicine research digest.
+
+# Goal
+Write a three-paragraph summary for clinicians.
+
+# Success criteria
+- Return exactly 3 paragraphs separated by a blank line.
+- Paragraph 1 summarises the overall landscape and study-type mix.
+- Paragraph 2 covers paediatric research, or states exactly: "No paediatric-focused papers are featured in this week's digest."
+- Paragraph 3 highlights the 2 to 3 most important contributions and why they matter clinically.
+- Use only the provided digest data.
+- Do not use bullets or headings.
+"""
+
+_ANALYSIS_INSTRUCTIONS = """You are a medical research analyst for a critical care and emergency medicine digest.
+
+# Goal
+Classify each paper and produce a concise downstream-ready summary.
+
+# Success criteria
+- Return one analysis per paper in input order.
+- Choose topic, study_type, and patient_group only from the allowed lists.
+- research_area must be a specific 3-6 word sub-area and not a restatement of topic.
+- relevance_score must be an integer from 1 to 5 based on likely clinical impact.
+- summary must be 2 to 3 plain-language sentences.
+- key_findings must contain 1 to 3 specific factual findings.
+- Use only the provided paper content. If evidence is limited, choose the safest conservative classification instead of inventing details.
+
+# Output
+Return structured output only.
+"""
+
+_CLASSIFICATION_GUIDANCE = (
+    "Allowed topic values:\n"
+    + "\n".join(f"- {topic}" for topic in TOPICS)
+    + "\n\nAllowed study_type values:\n"
+    + "\n".join(f"- {study_type}" for study_type in STUDY_TYPES)
+    + "\n\nAllowed patient_group values:\n"
+    + "\n".join(f"- {patient_group}" for patient_group in PATIENT_GROUPS)
+    + "\n\nRelevance score guide:\n"
+    + "- 5 = major clinical breakthrough with clear patient impact\n"
+    + "- 4 = important finding with near-term medical application\n"
+    + "- 3 = solid research, potential healthcare relevance\n"
+    + "- 2 = preliminary or methodological work\n"
+    + "- 1 = marginal medical relevance"
+)
+
+
+class PaperAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(description="1-based paper index in the current batch.")
+    topic: str
+    study_type: str
+    research_area: str
+    patient_group: str
+    relevance_score: int = Field(ge=1, le=5)
+    summary: str
+    key_findings: List[str]
+
+
+class PaperAnalysisBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    papers: List[PaperAnalysis]
+
+
+def _response_text(response) -> str:
+    return (getattr(response, "output_text", "") or "").strip()
+
+
+def _reasoning_config() -> Any:
+    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT})
+
+
+def _text_config() -> Any:
+    return cast(Any, {"verbosity": Config.LLM_TEXT_VERBOSITY})
+
+
+def _analysis_input(papers: List[Paper]) -> str:
+    papers_text = ""
+    for idx, paper in enumerate(papers, start=1):
+        content = paper.full_text[:5000] if paper.full_text else paper.abstract
+        papers_text += (
+            f"\nPaper {idx}\n"
+            f"Title: {paper.title}\n"
+            f"Authors: {', '.join(paper.authors[:3]) or 'Unknown'}\n"
+            f"Source: {paper.source}\n"
+            f"Content: {content}\n"
+        )
+
+    return f"{_CLASSIFICATION_GUIDANCE}\n\nPaper batch:{papers_text}"
+
 
 class LLMProcessor:
     def __init__(self):
@@ -98,24 +204,26 @@ class LLMProcessor:
         top3 = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:3]
 
         prompt = (
-            f"You are a medical research editor writing a concise header introduction "
-            f"for a daily healthcare research email digest.\n\n"
             f"Date: {date_str}\n"
             f"Total papers: {len(papers)}\n"
             f"Average relevance score: {avg:.1f}/5\n"
             f"Top topics: {', '.join(f'{t} ({c})' for t, c in top3)}\n"
-            f"Highest-impact titles: {'; '.join(high_impact[:3]) or 'none'}\n\n"
-            "Write 2-3 sentences that highlight today's key themes and most "
-            "significant findings. Be concise and informative."
+            f"Highest-impact titles: {'; '.join(high_impact[:3]) or 'none'}"
         )
         try:
-            resp = self.client.chat.completions.create(
+            resp = self.client.responses.create(
                 model=Config.LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.5,
-                max_completion_tokens=600,
+                instructions=_DIGEST_INTRO_INSTRUCTIONS,
+                input=[{"role": "user", "content": prompt}],
+                reasoning=_reasoning_config(),
+                text=_text_config(),
+                max_output_tokens=220,
+                store=False,
             )
-            return resp.choices[0].message.content.strip()
+            intro = _response_text(resp)
+            if intro:
+                return intro
+            raise ValueError("Empty digest intro response")
         except Exception as exc:
             logger.error("Error generating digest intro: %s", exc)
             return (
@@ -162,47 +270,41 @@ class LLMProcessor:
             for p in high_papers
         ) or "  (none)"
 
-        prompt = f"""You are a senior medical research editor. Write a structured weekly overview for a critical care and emergency medicine research digest, consisting of exactly THREE paragraphs separated by a blank line.
-
-Week: {date_str}
+        prompt = f"""Week: {date_str}
 Total papers: {len(papers)} ({len(paeds_papers)} paediatric)
 Sources: PubMed + medRxiv
 Focus areas: paediatric critical care, adult intensive care, emergency medicine
 
-[Top Topics (up to 5)]
-{chr(10).join(f"  {t}: {c} paper(s)" for t, c in top_topics)}
+Top topics:
+{chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_topics)}
 
-[Study Type Distribution (up to 5)]
-{chr(10).join(f"  {t}: {c} paper(s)" for t, c in top_types) or "  (no data)"}
+Study type distribution:
+{chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_types) or "- no data"}
 
-[Specific Research Areas (up to 5)]
-{chr(10).join(f"  {a}: {c} paper(s)" for a, c in top_areas) or "  (no data)"}
+Specific research areas:
+{chr(10).join(f"- {a}: {c} paper(s)" for a, c in top_areas) or "- no data"}
 
-[Paediatric Papers]
+Paediatric papers:
 {paeds_block}
 
-[High-Impact Papers (score >= 4)]
-{high_block}
-
-Write EXACTLY three paragraphs:
-
-PARAGRAPH 1 (100-150 words): General landscape summary. Cover the dominant topics, distribution of study types (e.g. proportion of RCTs, reviews, observational studies), and overall breadth of this week's research in critical care and emergency medicine.
-
-PARAGRAPH 2 (60-100 words): Paediatric research focus. If there are paediatric papers, summarise their topics and the core findings of the 2-3 most important papers. If there are none, state clearly: "No paediatric-focused papers are featured in this week's digest."
-
-PARAGRAPH 3 (80-120 words): Key contributions. Highlight the core findings of the 2-3 most important papers (highest relevance score), explaining their significance for clinical practice.
-
-Use clear, professional language aimed at intensive care and emergency medicine practitioners. Do not use headers or bullet points."""
+High-impact papers (score >= 4):
+{high_block}"""
 
         for attempt in range(2):
             try:
-                resp = self.client.chat.completions.create(
+                resp = self.client.responses.create(
                     model=Config.LLM_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.5,
-                    max_completion_tokens=1000,
+                    instructions=_WEEKLY_SUMMARY_INSTRUCTIONS,
+                    input=[{"role": "user", "content": prompt}],
+                    reasoning=_reasoning_config(),
+                    text=_text_config(),
+                    max_output_tokens=700,
+                    store=False,
                 )
-                return resp.choices[0].message.content.strip()
+                summary = _response_text(resp)
+                if summary:
+                    return summary
+                raise ValueError("Empty weekly summary response")
             except Exception as exc:
                 logger.error("Error generating weekly summary (attempt %d): %s", attempt + 1, exc)
                 time.sleep(_RETRY_SLEEP)
@@ -218,83 +320,26 @@ Use clear, professional language aimed at intensive care and emergency medicine 
 
     def _analyze_batch(self, papers: List[Paper]):
         """Call the LLM for one batch and update paper objects in-place."""
-        papers_text = ""
-        for idx, p in enumerate(papers, start=1):
-            content = p.full_text[:5000] if p.full_text else p.abstract
-            papers_text += (
-                f"\n--- Paper {idx} ---\n"
-                f"Title: {p.title}\n"
-                f"Authors: {', '.join(p.authors[:3]) or 'Unknown'}\n"
-                f"Source: {p.source}\n"
-                f"Content: {content}\n"
-            )
-
-        system = (
-            "You are a medical research analyst. "
-            "Analyse the provided papers and return ONLY valid JSON."
-        )
-        user = f"""Analyse these {len(papers)} medical/healthcare research papers and return a JSON object.
-
-{papers_text}
-
-Return exactly this structure:
-{{
-  "papers": [
-    {{
-      "index": 1,
-      "topic": "<topic from TOPICS list>",
-      "study_type": "<study type from STUDY_TYPES list>",
-      "research_area": "<specific sub-area in 3-6 words, e.g. 'Type 2 Diabetes Management'>",
-      "patient_group": "<patient group from PATIENT_GROUPS list>",
-      "relevance_score": <integer 1-5>,
-      "summary": "<2-3 sentence plain-language summary>",
-      "key_findings": ["<finding 1>", "<finding 2>", "<finding 3>"]
-    }}
-  ]
-}}
-
-TOPICS (pick the single best match):
-{json.dumps(TOPICS)}
-
-STUDY_TYPES (pick the single best match):
-{json.dumps(STUDY_TYPES)}
-
-PATIENT_GROUPS (pick the single best match):
-{json.dumps(PATIENT_GROUPS)}
-
-Relevance scoring:
-  5 = major clinical breakthrough with clear patient impact
-  4 = important finding with near-term medical application
-  3 = solid research, potential healthcare relevance
-  2 = preliminary / methodological work
-  1 = marginal medical relevance
-
-Rules:
-- Provide exactly {len(papers)} objects in the same order as input.
-- research_area must be specific (not a repeat of topic).
-- patient_group: choose 'Paediatric' only if the study explicitly focuses on children/adolescents (<18 yrs); choose 'No human subjects' for animal/in vitro/computational studies; otherwise 'Adult' or 'Mixed / All Ages'.
-- summary must be readable by a non-specialist.
-- key_findings should be specific, factual statements."""
+        user = _analysis_input(papers)
 
         for attempt in range(2):
             try:
-                resp = self.client.chat.completions.create(
+                resp = self.client.responses.parse(
                     model=Config.LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.1,
-                    max_completion_tokens=5000
+                    instructions=_ANALYSIS_INSTRUCTIONS,
+                    input=[{"role": "user", "content": user}],
+                    text_format=PaperAnalysisBatch,
+                    reasoning=_reasoning_config(),
+                    max_output_tokens=5000,
+                    store=False,
                 )
-                result = json.loads(resp.choices[0].message.content)
-                analyses = result.get("papers", [])
+                result = getattr(resp, "output_parsed", None)
+                if result is None:
+                    raise ValueError("Missing structured paper analysis output")
+
+                analyses = result.papers
                 self._apply_results(papers, analyses)
                 return
-            except json.JSONDecodeError as exc:
-                logger.warning("JSON decode error (attempt %d): %s", attempt + 1, exc)
-                time.sleep(_RETRY_SLEEP)
             except Exception as exc:
                 logger.error("LLM API error (attempt %d): %s", attempt + 1, exc)
                 time.sleep(_RETRY_SLEEP)
@@ -303,15 +348,15 @@ Rules:
 
     def _apply_results(self, papers: List[Paper], analyses: list):
         for item in analyses:
-            idx = int(item.get("index", 1)) - 1
+            idx = item.index - 1
             if 0 <= idx < len(papers):
-                papers[idx].topic          = item.get("topic", "Other Healthcare Topics")
-                papers[idx].study_type     = item.get("study_type", "Other / Unclear")
-                papers[idx].research_area  = item.get("research_area", "")
-                papers[idx].patient_group  = item.get("patient_group", "No human subjects")
-                papers[idx].relevance_score = int(item.get("relevance_score", 3))
-                papers[idx].summary        = item.get("summary", "")
-                papers[idx].key_findings   = item.get("key_findings", [])
+                papers[idx].topic = item.topic or "Other Healthcare Topics"
+                papers[idx].study_type = item.study_type or "Other / Unclear"
+                papers[idx].research_area = item.research_area or ""
+                papers[idx].patient_group = item.patient_group or "No human subjects"
+                papers[idx].relevance_score = item.relevance_score or 3
+                papers[idx].summary = item.summary or ""
+                papers[idx].key_findings = item.key_findings or []
         self._apply_defaults([p for p in papers if not p.topic])
 
     def _apply_defaults(self, papers: List[Paper]):

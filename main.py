@@ -41,8 +41,8 @@ def run_digest():
     from notifier.email_sender import send_email, save_html_report
 
     today = datetime.now()
-    week_start = today - timedelta(days=today.weekday())   # Monday
-    week_end   = week_start + timedelta(days=6)             # Sunday
+    week_start = today - timedelta(days=7)  
+    week_end   = week_start + timedelta(days=6) 
     if week_start.month == week_end.month:
         date_str = f"{week_start.strftime('%B %d')}\u2013{week_end.strftime('%d, %Y')}"
     else:
