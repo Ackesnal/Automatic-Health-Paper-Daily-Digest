@@ -28,7 +28,11 @@ jobs:
           EMAIL_RECIPIENT:     ${{ secrets.EMAIL_RECIPIENT }}
           EMAIL_LOGO_URL:      ${{ secrets.EMAIL_LOGO_URL }}
           PUBMED_SEARCH_QUERY: ${{ secrets.PUBMED_SEARCH_QUERY }}
-          LLM_MODEL:           ${{ secrets.LLM_MODEL }}
+          LLM_MODEL_FOR_SUMMARY: ${{ secrets.LLM_MODEL_FOR_SUMMARY }}
+          LLM_MODEL_FOR_FILTER: ${{ secrets.LLM_MODEL_FOR_FILTER }}
+          LLM_REASONING_EFFORT_FOR_SUMMARY: ${{ secrets.LLM_REASONING_EFFORT_FOR_SUMMARY }}
+          LLM_REASONING_EFFORT_FOR_FILTER: ${{ secrets.LLM_REASONING_EFFORT_FOR_FILTER }}
+          LLM_TEXT_VERBOSITY: ${{ secrets.LLM_TEXT_VERBOSITY }}
           DAYS_BACK:           ${{ secrets.DAYS_BACK }}
           MAX_PAPERS_MEDRXIV:  ${{ secrets.MAX_PAPERS_MEDRXIV }}
           MAX_PAPERS_PUBMED:   ${{ secrets.MAX_PAPERS_PUBMED }}

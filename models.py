@@ -19,8 +19,9 @@ class Paper:
     topic: str = ""
     study_type: str = ""        # e.g. RCT, Systematic Review, Observational Study …
     research_area: str = ""     # specific sub-area, e.g. "Diabetes Management"
-    patient_group: str = ""     # Paediatric / Adult / Mixed / All Ages / No human subjects
-    relevance_score: int = 0
+    patient_group: str = ""     # Paediatric / Neonatal / Adult / Mixed / No human subjects
+    care_setting: str = ""      # Intensive Care / Emergency Department / Both / Other
+    importance_score: int = 0
     summary: str = ""
     key_findings: List[str] = field(default_factory=list)
     full_text: Optional[str] = None

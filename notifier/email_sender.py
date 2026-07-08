@@ -19,19 +19,26 @@ _TOPIC_COLORS: Dict[str, str] = {
     "Drug Discovery & Pharmacology":        "#E65100",
     "Genomics & Precision Medicine":        "#00695C",
     "Medical Imaging & Diagnostics":        "#0277BD",
-    "Public Health & Epidemiology":         "#2E7D32",
     "Cardiology & Cardiovascular Disease":  "#C62828",
     "Oncology & Cancer Research":           "#4E342E",
     "Infectious Diseases":                  "#BF360C",
     "Neurology & Brain Disorders":          "#283593",
     "Surgery & Procedures":                 "#37474F",
-    "Mental Health & Psychiatry":           "#880E4F",
     "Other Healthcare Topics":              "#546E7A",
 }
 
+_MERGED_TOPICS = {"Public Health & Epidemiology", "Mental Health & Psychiatry"}
+
 
 def _color(topic: str) -> str:
+    # Merge removed topics into Other
+    if topic in _MERGED_TOPICS:
+        return _TOPIC_COLORS["Other Healthcare Topics"]
     return _TOPIC_COLORS.get(topic, "#546E7A")
+
+
+def _effective_topic(topic: str) -> str:
+    return "Other Healthcare Topics" if topic in _MERGED_TOPICS else topic
 
 
 def _stars(score: int) -> str:
@@ -70,10 +77,18 @@ _TYPE_BADGE: Dict[str, str] = {
 }
 
 _PATIENT_BADGE: Dict[str, str] = {
+    "Neonatal":          "#AD1457",   # deep pink
     "Paediatric":        "#E65100",   # deep orange
     "Adult":             "#1565C0",   # blue
     "Mixed / All Ages":  "#546E7A",   # blue-grey
-    "No human subjects":    "#757575",   # grey
+    "No human subjects": "#757575",   # grey
+}
+
+_CARE_BADGE: Dict[str, str] = {
+    "Intensive Care":       "#1565C0",   # blue
+    "Emergency Department": "#BF360C",   # deep red-orange
+    "Both":                 "#4A148C",   # deep purple
+    "Other":                "#757575",   # grey
 }
 
 
@@ -90,7 +105,7 @@ def _paper_card(paper: Paper) -> str:
     if len(paper.authors) > 3:
         authors += " et al."
 
-    # Study type + research area badges
+    # Study type + research area + patient + care setting badges
     badges = ""
     if paper.study_type:
         tc = _TYPE_BADGE.get(paper.study_type, "#757575")
@@ -99,7 +114,10 @@ def _paper_card(paper: Paper) -> str:
         badges += _badge(paper.research_area, color) + " "
     if paper.patient_group:
         pg_color = _PATIENT_BADGE.get(paper.patient_group, "#757575")
-        badges += _badge(paper.patient_group, pg_color)
+        badges += _badge(paper.patient_group, pg_color) + " "
+    if paper.care_setting:
+        cs_color = _CARE_BADGE.get(paper.care_setting, "#757575")
+        badges += _badge(paper.care_setting, cs_color)
 
     kf_html = ""
     if paper.key_findings:
@@ -123,8 +141,6 @@ def _paper_card(paper: Paper) -> str:
             "&#128462; PDF</a>"
         )
 
-    pub_str = paper.published.strftime("%Y-%m-%d") if paper.published else ""
-
     return f"""
 <div style="background:#fff;border:1px solid #E0E0E0;border-left:4px solid {color};
             border-radius:4px;padding:16px;margin-bottom:12px;">
@@ -136,8 +152,7 @@ def _paper_card(paper: Paper) -> str:
   <div style="font-size:12px;color:#757575;margin-bottom:8px;">
     <span style="margin-right:10px;">&#128100; {authors}</span>
     <span style="margin-right:10px;">&#128196; {paper.source}</span>
-    <span style="margin-right:10px;">&#128197; {pub_str}</span>
-    <span>{_stars(paper.relevance_score)}</span>
+    <span>{_stars(paper.importance_score)}</span>
     {pdf_link}
   </div>
   <div style="margin-bottom:10px;">{badges}</div>
@@ -173,72 +188,87 @@ def _topics_distribution_chart(papers: List[Paper]) -> str:
 
 
 def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
-    # Split by patient group first
-    paeds_all = sorted(
-        [p for p in papers if p.patient_group == "Paediatric"],
-        key=lambda x: x.relevance_score, reverse=True,
-    )
-    adult_all = [p for p in papers if p.patient_group != "Paediatric"]
+    # Normalise removed topics
+    for p in papers:
+        p.topic = _effective_topic(p.topic)
 
-    # ── Paediatric section (no topic subdivision) ────────────────────────────
-    if paeds_all:
-        paeds_cards = "".join(_paper_card(p) for p in paeds_all)
-        plural_p = "s" if len(paeds_all) > 1 else ""
-        paeds_html = f"""
+    # ── Top papers section (score >= 4) ───────────────────────────────────────
+    top_papers = sorted(
+        [p for p in papers if p.importance_score >= 4],
+        key=lambda x: x.importance_score, reverse=True,
+    )
+    if top_papers:
+        top_cards = "".join(_paper_card(p) for p in top_papers)
+        plural_t = "s" if len(top_papers) > 1 else ""
+        top_section_html = f"""
 <div style="margin-bottom:32px;">
-  <div style="font-size:17px;font-weight:700;color:#1565C0;margin-bottom:16px;">
-    &#128118; Paediatric Papers ({len(paeds_all)})
+  <div style="background:#F57F17;color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:12px;">
+    <span style="font-size:15px;font-weight:700;">&#11088; Most Important Paper{plural_t} ({len(top_papers)})</span>
   </div>
-  {paeds_cards}
+  {top_cards}
 </div>"""
     else:
-        paeds_html = """
-<div style="margin-bottom:32px;">
-  <div style="background:#E65100;color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:12px;">
-    <span style="font-size:15px;font-weight:600;">&#128118; Paediatric Papers</span>
+        top_section_html = ""
+
+    # ── Remaining papers split by age group, then by topic ───────────────────
+    remaining = [p for p in papers if p.importance_score < 4]
+
+    def _age_section(label: str, icon: str, color: str, group_papers: List[Paper]) -> str:
+        if not group_papers:
+            return f"""
+<div style="margin-bottom:28px;">
+  <div style="background:{color};color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:8px;">
+    <span style="font-size:15px;font-weight:600;">{icon} {label}</span>
     <span style="font-size:12px;opacity:0.85;margin-left:8px;">(0 papers)</span>
   </div>
-  <p style="color:#9E9E9E;font-size:13px;font-style:italic;margin:0;">
-    No paediatric papers in this week's digest.
-  </p>
+  <p style="color:#9E9E9E;font-size:13px;font-style:italic;margin:4px 0 0 0;">No {label.lower()} papers in this week's digest.</p>
 </div>"""
 
-    # ── Adult / General section grouped by TOPICS ────────────────────────────
-    by_topic: Dict[str, List[Paper]] = defaultdict(list)
-    for p in adult_all:
-        by_topic[p.topic].append(p)
-    for lst in by_topic.values():
-        lst.sort(key=lambda x: x.relevance_score, reverse=True)
-    sorted_topics = [
-      (topic, by_topic[topic])
-      for topic in _ordered_topics(list(by_topic.keys()))
-    ]
+        inner_by_topic: Dict[str, List[Paper]] = defaultdict(list)
+        for p in group_papers:
+            inner_by_topic[p.topic].append(p)
+        for lst in inner_by_topic.values():
+            lst.sort(key=lambda x: x.importance_score, reverse=True)
+        ordered = [(t, inner_by_topic[t]) for t in _ordered_topics(list(inner_by_topic.keys()))]
 
-    adult_topics_html = ""
-    for topic, lst in sorted_topics:
-        c = _color(topic)
-        plural = "s" if len(lst) > 1 else ""
-        cards = "".join(_paper_card(p) for p in lst)
-        adult_topics_html += f"""
-<div style="margin-bottom:28px;">
-  <div style="background:{c};color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:12px;">
-    <span style="font-size:15px;font-weight:600;">{topic}</span>
-    <span style="font-size:12px;opacity:0.85;margin-left:8px;">({len(lst)} paper{plural})</span>
+        inner_html = ""
+        for topic, lst in ordered:
+            c = _color(topic)
+            plural = "s" if len(lst) > 1 else ""
+            cards = "".join(_paper_card(p) for p in lst)
+            inner_html += f"""
+<div style="margin-bottom:20px;">
+  <div style="background:{c};color:#fff;padding:8px 14px;border-radius:4px;margin-bottom:10px;">
+    <span style="font-size:14px;font-weight:600;">{topic}</span>
+    <span style="font-size:11px;opacity:0.85;margin-left:8px;">({len(lst)} paper{plural})</span>
   </div>
   {cards}
 </div>"""
 
-    adult_section_header = f"""
-<div style="border-top:2px solid #E0E0E0;padding-top:20px;margin-bottom:20px;">
-  <div style="font-size:17px;font-weight:700;color:#1565C0;margin-bottom:16px;">
-    &#128100; Adult / General Papers ({len(adult_all)})
+        plural_g = "s" if len(group_papers) > 1 else ""
+        return f"""
+<div style="margin-bottom:32px;">
+  <div style="background:{color};color:#fff;padding:10px 16px;border-radius:4px;margin-bottom:12px;">
+    <span style="font-size:15px;font-weight:600;">{icon} {label} ({len(group_papers)} paper{plural_g})</span>
   </div>
-  {adult_topics_html}
+  {inner_html}
 </div>"""
 
-    topics_html = paeds_html + adult_section_header
+    neonatal_papers = [p for p in remaining if p.patient_group == "Neonatal"]
+    paeds_papers    = [p for p in remaining if p.patient_group == "Paediatric"]
+    other_papers    = [p for p in remaining if p.patient_group == "Adult" or p.patient_group == "Mixed"]
 
-    high = sum(1 for p in papers if p.relevance_score >= 4)
+    topics_html = (
+        top_section_html
+        + _age_section("Paediatric",      "&#128103;", "#E65100", paeds_papers)
+        + _age_section("Adult / Mixed",   "&#128104;", "#1565C0", other_papers)
+        + _age_section("Neonatal",        "&#128118;", "#AD1457", neonatal_papers)
+    )
+
+    high = len(top_papers)
+    by_topic_all: Dict[str, int] = {}
+    for p in papers:
+        by_topic_all[p.topic] = by_topic_all.get(p.topic, 0) + 1
     topics_dist_html = _topics_distribution_chart(papers)
     _para_style = "font-size:14px;color:#1B5E20;line-height:1.9;margin:0 0 12px 0;"
     summary_paras_html = "".join(
@@ -257,7 +287,7 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
       <div style="font-size:13px;color:#51247A;font-weight:700;">TOTAL PAPERS</div>
     </td>
     <td width="33%" align="center" style="border-right:1px solid #7A5899;">
-      <div style="font-size:26px;font-weight:700;color:#51247A;">{len(by_topic)}</div>
+      <div style="font-size:26px;font-weight:700;color:#51247A;">{len(by_topic_all)}</div>
       <div style="font-size:13px;color:#51247A;font-weight:700;">TOPIC AREAS</div>
     </td>
     <td width="34%" align="center">
@@ -279,7 +309,7 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>Medical Research Digest &ndash; {date_str}</title>
+  <title>Intensive Care Medical Research Digest &ndash; {date_str}</title>
 </head>
 <body style="margin:0;padding:0;background:#F5F5F5;
              font-family:Arial,Helvetica,sans-serif;">
@@ -295,7 +325,7 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
         {logo_html}
         <h1 style="margin:0 0 6px 0;font-size:25px;color:#ffffff;
                    font-family:Arial,Helvetica,sans-serif;">
-          Medical Research Weekly Digest
+          Intensive Care Medical Research Weekly Digest
         </h1>
         <p style="margin:0;font-size:17px;color:#ffffff;opacity:.9;">{date_str}</p>
       </td>
@@ -326,9 +356,12 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
   <!-- Footer -->
   <div style="text-align:center;padding:18px;color:#9E9E9E;font-size:11px;">
     <p style="margin:0;">
-      Generated by ChIRP Medical Paper Digest &nbsp;|&nbsp;
+      Generated by ChIRP Intensive Care Medical Research Digest &nbsp;|&nbsp;
       <a href="https://pubmed.ncbi.nlm.nih.gov" style="color:#9E9E9E;">PubMed</a> &nbsp;|&nbsp;
       <a href="https://www.medrxiv.org" style="color:#9E9E9E;">medRxiv</a>
+    </p>
+    <p style="margin:6px 0 0 0;">
+      Service developed and maintained by Xuwei Xu (xuwei.xu@uq.edu.au)!
     </p>
     <p style="margin:6px 0 0 0;">
       Automated digest – Always verify information from original sources!
@@ -356,12 +389,12 @@ def send_email(papers: List[Paper], weekly_summary: str, date_str: str) -> bool:
         return False
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"ChIRP Medical Research Digest | {date_str} | {len(papers)} papers"
+    msg["Subject"] = f"ChIRP Intensive Care Medical Research Digest | {date_str} | {len(papers)} papers"
     msg["From"] = Config.EMAIL_SENDER
     msg["To"] = ", ".join(recipients)
 
     # Plain-text fallback
-    plain = f"ChIRP Medical Research Digest – {date_str}\n{len(papers)} papers\n\n"
+    plain = f"ChIRP Intensive Care Medical Research Digest – {date_str}\n{len(papers)} papers\n\n"
     for p in papers[:15]:
         plain += f"[{p.source}] {p.title}\n{p.url}\n\n"
 

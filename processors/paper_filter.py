@@ -70,8 +70,12 @@ _AREA_PATTERNS: List[re.Pattern] = [
 _FOCUS_AREAS = (
     "paediatric critical care, "
     "paediatric intensive care (PICU), "
+    "adult critical care, "
     "adult intensive care (ICU), "
-    "emergency medicine"
+    "neonatal critical care, "
+    "neonatal intensive care (NICU), "
+    "emergency medicine, "
+    "emergency department (ED)"
 )
 
 _SCREENING_INSTRUCTIONS = """You screen papers for a critical care and emergency medicine digest.
@@ -118,7 +122,7 @@ def _screening_input(batch: List[Paper]) -> str:
         papers_text += (
             f"\nPaper {i}\n"
             f"Title: {paper.title}\n"
-            f"Abstract: {paper.abstract[:600]}\n"
+            f"Abstract: {paper.abstract}\n"
         )
 
     return (
@@ -130,7 +134,7 @@ def _screening_input(batch: List[Paper]) -> str:
 
 
 def _reasoning_config() -> Any:
-    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT})
+    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT_FOR_FILTER})
 
 
 def _llm_verify(papers: List[Paper]) -> List[bool]:
@@ -152,12 +156,12 @@ def _llm_verify(papers: List[Paper]) -> List[bool]:
         for attempt in range(2):
             try:
                 resp = client.responses.parse(
-                    model=Config.LLM_MODEL,
+                    model=Config.LLM_MODEL_FOR_FILTER,
                     instructions=_SCREENING_INSTRUCTIONS,
                     input=[{"role": "user", "content": prompt}],
                     text_format=RelevanceBatch,
                     reasoning=_reasoning_config(),
-                    max_output_tokens=300,
+                    max_output_tokens=1000,
                     store=False,
                 )
                 data = getattr(resp, "output_parsed", None)
@@ -188,25 +192,42 @@ def _llm_verify(papers: List[Paper]) -> List[bool]:
     return results
 
 
+def _is_published(paper: Paper) -> bool:
+    """
+    A paper is considered published when it has a non-empty journal name.
+    PubMed papers always have a journal; medRxiv preprints have journal_name=""
+    until they are formally published.
+    """
+    return bool(paper.journal and paper.journal.strip())
+
+
 def filter_papers(papers: List[Paper]) -> List[Paper]:
     """
-    Three-stage filter:
-      1. Journal match → keep immediately.
-      2. Keyword match → LLM second-pass verification.
+    Four-stage filter:
+      0. Published check → unpublished preprints are discarded.
+      1. Journal match  → keep immediately.
+      2. Keyword match  → LLM second-pass verification.
       3. Everything else → discard immediately.
     """
+    published = [p for p in papers if _is_published(p)]
+    unpublished_count = len(papers) - len(published)
+    if unpublished_count:
+        logger.info(
+            "Excluded %d unpublished preprint(s) (no journal name)", unpublished_count
+        )
+
     journal_kept: List[Paper] = []
     keyword_candidates: List[Paper] = []
 
-    for p in papers:
+    for p in published:
         if p.journal and _journal_relevant(p.journal):
             journal_kept.append(p)
-            logger.debug("Kept (journal: %s): %s", p.journal, p.title[:60])
+            logger.info("Kept (journal: %s): %s", p.journal, p.title[:60])
         elif _keyword_match(p.abstract):
             keyword_candidates.append(p)
-            logger.debug("Keyword candidate: %s", p.title[:60])
+            logger.info("Keyword candidate: %s", p.title[:60])
         else:
-            logger.debug("Discarded (no match): %s", p.title[:60])
+            logger.info("Discarded (no match): %s", p.title[:60])
 
     # LLM second-pass on keyword candidates
     llm_kept: List[Paper] = []
@@ -219,16 +240,18 @@ def filter_papers(papers: List[Paper]) -> List[Paper]:
         for paper, keep in zip(keyword_candidates, decisions):
             if keep:
                 llm_kept.append(paper)
-                logger.debug("Kept (LLM confirmed): %s", paper.title[:60])
+                logger.info("Kept (LLM confirmed): %s", paper.title[:60])
             else:
-                logger.debug("Discarded (LLM rejected): %s", paper.title[:60])
+                logger.info("Discarded (LLM rejected): %s", paper.title[:60])
 
     kept = journal_kept + llm_kept
     logger.info(
-        "Paper filter: %d total → %d journal, %d LLM-confirmed, %d discarded",
+        "Paper filter: %d total → %d unpublished excluded, %d journal kept, "
+        "%d LLM-confirmed, %d discarded",
         len(papers),
+        unpublished_count,
         len(journal_kept),
         len(llm_kept),
-        len(papers) - len(kept),
+        len(published) - len(kept),
     )
     return kept

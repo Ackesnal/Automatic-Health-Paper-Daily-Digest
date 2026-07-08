@@ -123,8 +123,8 @@ def run_digest():
             p.study_type = "Other / Unclear"
             p.relevance_score = 3
             p.summary = p.abstract[:400]
-    except Exception as exc:
-        logger.error("LLM processing error: %s", exc)
+    # except Exception as exc:
+    #     logger.error("LLM processing error: %s", exc)
 
     # 4. Send email ────────────────────────────────────────────────────────
     success = send_email(all_papers, weekly_summary, date_str)

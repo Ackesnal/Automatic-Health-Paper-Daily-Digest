@@ -7,8 +7,10 @@ load_dotenv()
 class Config:
     # LLM
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-5.5")
-    LLM_REASONING_EFFORT: str = os.getenv("LLM_REASONING_EFFORT", "low")
+    LLM_MODEL_FOR_SUMMARY: str = os.getenv("LLM_MODEL_FOR_SUMMARY", "gpt-5.5")
+    LLM_REASONING_EFFORT_FOR_SUMMARY: str = os.getenv("LLM_REASONING_EFFORT_FOR_SUMMARY", "low")
+    LLM_MODEL_FOR_FILTER: str = os.getenv("LLM_MODEL_FOR_FILTER", "gpt-5.4-mini")
+    LLM_REASONING_EFFORT_FOR_FILTER: str = os.getenv("LLM_REASONING_EFFORT_FOR_FILTER", "low")
     LLM_TEXT_VERBOSITY: str = os.getenv("LLM_TEXT_VERBOSITY", "low")
 
     # Email

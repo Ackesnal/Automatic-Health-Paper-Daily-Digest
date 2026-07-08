@@ -19,34 +19,39 @@ TOPICS = [
     "Drug Discovery & Pharmacology",
     "Genomics & Precision Medicine",
     "Medical Imaging & Diagnostics",
-    "Public Health & Epidemiology",
     "Cardiology & Cardiovascular Disease",
     "Oncology & Cancer Research",
     "Infectious Diseases",
     "Neurology & Brain Disorders",
     "Surgery & Procedures",
-    "Mental Health & Psychiatry",
     "Other Healthcare Topics",
 ]
 
 STUDY_TYPES = [
-    "Randomized Controlled Trial (RCT)",
-    "Systematic Review / Meta-Analysis",
-    "Observational Study",
-    "Cohort Study",
-    "Cross-Sectional Study",
-    "Case Report / Case Series",
-    "Computational / Modeling Study",
-    "Laboratory / In Vitro Study",
-    "Clinical Guidelines / Review Article",
-    "Other / Unclear",
+    "Randomized controlled trial (RCT)",
+    "Prospective multi-centre study",
+    "Prospective single-centre study",
+    "Retrospective multi-centre study",
+    "Retrospective single-centre study",
+    "Systematic review / meta analysis",
+    "Observational study",
+    "Case report / case series",
+    "Other study types"
 ]
 
 PATIENT_GROUPS = [
-    "Paediatric",         # children / adolescents (< 18 years)
+    "Neonatal",           # neonates (< 28 days / NICU patients)
+    "Paediatric",         # children / adolescents (< 18 years, excluding neonates)
     "Adult",              # adults (≥ 18 years)
-    "Mixed / All Ages",   # involves or does not restrict to a single age group
-    "No human subjects",     # animal, in vitro, computational – no human subjects
+    "Mixed",   # spans multiple age groups
+    "No human subjects",  # animal, in vitro, computational – no human subjects
+]
+
+CARE_SETTINGS = [
+    "Intensive Care Unit",       # ICU / PICU / NICU / HDU
+    "Emergency Department", # ED / emergency medicine
+    "Both ICU and ED",                 # study covers both ICU and ED
+    "Other",                # pre-hospital, ward, community, lab, etc.
 ]
 
 _BATCH = 1          # papers per LLM call
@@ -88,8 +93,8 @@ Classify each paper and produce a concise downstream-ready summary.
 - Return one analysis per paper in input order.
 - Choose topic, study_type, and patient_group only from the allowed lists.
 - research_area must be a specific 3-6 word sub-area and not a restatement of topic.
-- relevance_score must be an integer from 1 to 5 based on likely clinical impact.
-- summary must be 2 to 3 plain-language sentences.
+- importance_score must be an integer from 1 to 5 based on likely clinical impact.
+- summary must be 3 to 4 plain-language sentences.
 - key_findings must contain 1 to 3 specific factual findings.
 - Use only the provided paper content. If evidence is limited, choose the safest conservative classification instead of inventing details.
 
@@ -104,12 +109,16 @@ _CLASSIFICATION_GUIDANCE = (
     + "\n".join(f"- {study_type}" for study_type in STUDY_TYPES)
     + "\n\nAllowed patient_group values:\n"
     + "\n".join(f"- {patient_group}" for patient_group in PATIENT_GROUPS)
-    + "\n\nRelevance score guide:\n"
-    + "- 5 = major clinical breakthrough with clear patient impact\n"
-    + "- 4 = important finding with near-term medical application\n"
-    + "- 3 = solid research, potential healthcare relevance\n"
-    + "- 2 = preliminary or methodological work\n"
-    + "- 1 = marginal medical relevance"
+    + "\n\nAllowed care_setting values:\n"
+    + "\n".join(f"- {s}" for s in CARE_SETTINGS)
+    + "\n\nImportance score guide (score is capped by study design):\n"
+    + "- Randomized controlled trial (RCT): max 5 stars\n"
+    + "- Prospective study: max 4 stars\n"
+    + "- Retrospective study: max 3 stars\n"
+    + "- Systematic review: max 2 stars\n"
+    + "- All other study types: max 1 star\n"
+    + "- Within the cap, score by clinical impact:\n"
+    + "  cap = major clinical breakthrough; cap-1 = important finding; lower = preliminary/methodological"
 )
 
 
@@ -121,7 +130,8 @@ class PaperAnalysis(BaseModel):
     study_type: str
     research_area: str
     patient_group: str
-    relevance_score: int = Field(ge=1, le=5)
+    care_setting: str
+    importance_score: int = Field(ge=1, le=5)
     summary: str
     key_findings: List[str]
 
@@ -137,7 +147,7 @@ def _response_text(response) -> str:
 
 
 def _reasoning_config() -> Any:
-    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT})
+    return cast(Any, {"effort": Config.LLM_REASONING_EFFORT_FOR_SUMMARY})
 
 
 def _text_config() -> Any:
@@ -151,8 +161,7 @@ def _analysis_input(papers: List[Paper]) -> str:
         papers_text += (
             f"\nPaper {idx}\n"
             f"Title: {paper.title}\n"
-            f"Authors: {', '.join(paper.authors[:3]) or 'Unknown'}\n"
-            f"Source: {paper.source}\n"
+            f"Authors: {', '.join(paper.authors) or 'Unknown'}\n"
             f"Content: {content}\n"
         )
 
@@ -174,7 +183,7 @@ class LLMProcessor:
         total = len(papers)
         logger.info(
             "LLM-processing %d papers with %s (batch=%d)",
-            total, Config.LLM_MODEL, _BATCH,
+            total, Config.LLM_MODEL_FOR_SUMMARY, _BATCH,
         )
         for i in range(0, total, _BATCH):
             batch = papers[i: i + _BATCH]
@@ -186,6 +195,15 @@ class LLMProcessor:
             self._analyze_batch(batch)
             if i + _BATCH < total:
                 time.sleep(1)
+        
+        papers_keep = []
+        for i in range(len(papers)):
+            if not papers[i].topic or papers[i].patient_group == "No human subjects" or papers[i].care_setting == "Other":
+                continue
+            papers_keep.append(papers[i])
+        logger.info(f"Removed {len(papers) - len(papers_keep)} papers with no topic, no human subjects, or other care setting.")
+
+        papers = papers_keep
         return papers
 
     def generate_digest_intro(self, papers: List[Paper], date_str: str) -> str:
@@ -196,8 +214,8 @@ class LLMProcessor:
 
         for p in papers:
             topic_counts[p.topic] = topic_counts.get(p.topic, 0) + 1
-            score_sum += p.relevance_score
-            if p.relevance_score >= 4:
+            score_sum += p.importance_score
+            if p.importance_score >= 4:
                 high_impact.append(p.title)
 
         avg = score_sum / len(papers) if papers else 0
@@ -206,13 +224,13 @@ class LLMProcessor:
         prompt = (
             f"Date: {date_str}\n"
             f"Total papers: {len(papers)}\n"
-            f"Average relevance score: {avg:.1f}/5\n"
+            f"Average importance score: {avg:.1f}/5\n"
             f"Top topics: {', '.join(f'{t} ({c})' for t, c in top3)}\n"
             f"Highest-impact titles: {'; '.join(high_impact[:3]) or 'none'}"
         )
         try:
             resp = self.client.responses.create(
-                model=Config.LLM_MODEL,
+                model=Config.LLM_MODEL_FOR_SUMMARY,
                 instructions=_DIGEST_INTRO_INSTRUCTIONS,
                 input=[{"role": "user", "content": prompt}],
                 reasoning=_reasoning_config(),
@@ -251,54 +269,54 @@ class LLMProcessor:
 
         paeds_papers = sorted(
             [p for p in papers if p.patient_group == "Paediatric"],
-            key=lambda x: x.relevance_score, reverse=True,
+            key=lambda x: x.importance_score, reverse=True,
         )
+        neonatal_papers = [p for p in papers if p.patient_group == "Neonatal"]
+        adult_papers = [p for p in papers if p not in neonatal_papers and p not in paeds_papers]
         paeds_block = "\n".join(
-            f"  - [{p.relevance_score}/5] {p.title}\n"
+            f"  - [{p.importance_score}/5] {p.title}\n"
             f"    Findings: {'; '.join(p.key_findings[:2])}"
             for p in paeds_papers[:5]
         ) or "  (none this week)"
 
         high_papers = sorted(
-            [p for p in papers if p.relevance_score >= 4],
-            key=lambda x: x.relevance_score,
+            [p for p in papers if p.importance_score >= 4],
+            key=lambda x: x.importance_score,
             reverse=True,
         )[:5]
         high_block = "\n".join(
-            f"  - [{p.relevance_score}/5] {p.title} ({p.source})\n"
+            f"  - [{p.importance_score}/5] {p.title} ({p.source})\n"
             f"    Findings: {'; '.join(p.key_findings[:2])}"
             for p in high_papers
         ) or "  (none)"
 
         prompt = f"""Week: {date_str}
-Total papers: {len(papers)} ({len(paeds_papers)} paediatric)
-Sources: PubMed + medRxiv
-Focus areas: paediatric critical care, adult intensive care, emergency medicine
+                Total papers: {len(papers)} ({len(neonatal_papers)} neonatal, {len(paeds_papers)} paediatric, {len(adult_papers)} adult and mixed)
 
-Top topics:
-{chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_topics)}
+                Top topics:
+                {chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_topics)}
 
-Study type distribution:
-{chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_types) or "- no data"}
+                Study type distribution:
+                {chr(10).join(f"- {t}: {c} paper(s)" for t, c in top_types) or "- no data"}
 
-Specific research areas:
-{chr(10).join(f"- {a}: {c} paper(s)" for a, c in top_areas) or "- no data"}
+                Specific research areas:
+                {chr(10).join(f"- {a}: {c} paper(s)" for a, c in top_areas) or "- no data"}
 
-Paediatric papers:
-{paeds_block}
+                Paediatric papers:
+                {paeds_block}
 
-High-impact papers (score >= 4):
-{high_block}"""
+                High-impact papers (score >= 4):
+                {high_block}"""
 
         for attempt in range(2):
             try:
                 resp = self.client.responses.create(
-                    model=Config.LLM_MODEL,
+                    model=Config.LLM_MODEL_FOR_SUMMARY,
                     instructions=_WEEKLY_SUMMARY_INSTRUCTIONS,
                     input=[{"role": "user", "content": prompt}],
                     reasoning=_reasoning_config(),
                     text=_text_config(),
-                    max_output_tokens=700,
+                    max_output_tokens=1000,
                     store=False,
                 )
                 summary = _response_text(resp)
@@ -320,14 +338,14 @@ High-impact papers (score >= 4):
 
     def _analyze_batch(self, papers: List[Paper]):
         """Call the LLM for one batch and update paper objects in-place."""
-        user = _analysis_input(papers)
+        content = _analysis_input(papers)
 
         for attempt in range(2):
             try:
                 resp = self.client.responses.parse(
-                    model=Config.LLM_MODEL,
+                    model=Config.LLM_MODEL_FOR_SUMMARY,
                     instructions=_ANALYSIS_INSTRUCTIONS,
-                    input=[{"role": "user", "content": user}],
+                    input=[{"role": "user", "content": content}],
                     text_format=PaperAnalysisBatch,
                     reasoning=_reasoning_config(),
                     max_output_tokens=5000,
@@ -354,7 +372,8 @@ High-impact papers (score >= 4):
                 papers[idx].study_type = item.study_type or "Other / Unclear"
                 papers[idx].research_area = item.research_area or ""
                 papers[idx].patient_group = item.patient_group or "No human subjects"
-                papers[idx].relevance_score = item.relevance_score or 3
+                papers[idx].care_setting = item.care_setting or "Other"
+                papers[idx].importance_score = item.importance_score or 1
                 papers[idx].summary = item.summary or ""
                 papers[idx].key_findings = item.key_findings or []
         self._apply_defaults([p for p in papers if not p.topic])
@@ -366,6 +385,7 @@ High-impact papers (score >= 4):
                 p.study_type    = "Other / Unclear"
                 p.research_area = ""
                 p.patient_group = "No human subjects"
-                p.relevance_score = 3
+                p.care_setting  = "Other"
+                p.importance_score = 1
                 p.summary = (p.abstract[:400] + "...") if len(p.abstract) > 400 else p.abstract
                 p.key_findings  = []
