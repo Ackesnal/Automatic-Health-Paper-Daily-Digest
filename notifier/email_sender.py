@@ -361,7 +361,7 @@ def _build_html(papers: List[Paper], weekly_summary: str, date_str: str) -> str:
       <a href="https://www.medrxiv.org" style="color:#9E9E9E;">medRxiv</a>
     </p>
     <p style="margin:6px 0 0 0;">
-      Service developed and maintained by Xuwei Xu (xuwei.xu@uq.edu.au)!
+      Service developed and maintained by Xuwei Xu (xuwei.xu@uq.edu.au)
     </p>
     <p style="margin:6px 0 0 0;">
       Automated digest – Always verify information from original sources!
